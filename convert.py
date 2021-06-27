@@ -7,6 +7,7 @@ import subprocess
 import logging
 import json
 import hashlib
+import stat
 
 def mkdir(path, skipIfExist=False):
     if os.path.exists(path):
@@ -54,6 +55,32 @@ class UnpackedLayer:
         path = os.path.join(dirpath, 'layer.tar')
         subprocess.run(['tar', '-cf', path, '-C', self.src, '.'])
         return Layer(path)
+    
+    def convert(self, metadata, pool):
+        root = {'mode': os.lstat(self.src).st_mode, 'dirents': {}}
+        note = {self.src: root}
+        for parent, dirs, files in os.walk(self.src):
+            dirents = note[parent]['dirents']
+            for d in dirs:
+                path = os.path.join(parent, d)
+                s = os.lstat(path)
+                entry = {'mode': s.st_mode, 'dirents': {}}
+                dirents[d] = entry
+                note[path] = entry
+            for f in files:
+                path = os.path.join(parent, f)
+                s = os.lstat(path)
+                if stat.S_ISLNK(s.st_mode):
+                    entry = {'mode': s.st_mode, 'size': s.st_size, 'link': os.readlink(path)}
+                else:
+                    checksum = sha256sum(path)
+                    entry = {'mode': s.st_mode, 'size': s.st_size, 'sha256': checksum}
+                    target = os.path.join(pool, checksum)
+                    if not os.path.exists(target):
+                        shutil.copyfile(path, target)
+                dirents[f] = entry 
+        with open(metadata, 'w') as fp:
+            json.dump(root, fp, separators=(',', ':'))
 
 class Image:
     def __init__(self, path):
@@ -62,8 +89,7 @@ class Image:
         self._src = relPath(self._name + '-orig')
         self._dst = relPath(self._name + '-lazy')
         self._tmp = relPath(self._name + '-temp')
-
-        self._poolPath = self._name + '-pool'
+        self._pool = relPath(self._name + '-pool')
         self._dstTar = self._name + '-lazy.tar'
 
     def convert(self):
@@ -79,8 +105,11 @@ class Image:
 
     def _assembleLayers(self):
         mkdir(self._dst())
+        mkdir(self._pool(), skipIfExist=True)
         self._config['rootfs']['diff_ids'] = []
         for layer in self._unpackedLayers:
+            layer.convert(self._tmp(os.path.join(layer.id, 'metadata.json')), self._pool())
+            #TODO
             packedLayer = layer.pack(self._dst())
             checksum = 'sha256:' + sha256sum(packedLayer.src)
             self._config['rootfs']['diff_ids'].append(checksum)
