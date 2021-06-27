@@ -9,6 +9,8 @@ import json
 import hashlib
 import stat
 
+jsonSep = (',', ':')
+
 def mkdir(path, skipIfExist=False):
     if os.path.exists(path):
         if skipIfExist and os.path.isdir(path):
@@ -80,7 +82,7 @@ class UnpackedLayer:
                         shutil.copyfile(path, target)
                 dirents[f] = entry 
         with open(metadata, 'w') as fp:
-            json.dump(root, fp, separators=(',', ':'))
+            json.dump(root, fp, separators=jsonSep)
 
 class Image:
     def __init__(self, path):
@@ -118,10 +120,10 @@ class Image:
             shutil.copyfile(self._src(layer.id, 'json'), self._dst(layer.id, 'json'))
 
     def _writeConfigs(self):
-        configHash = hashlib.sha256(json.dumps(self._config, separators=(',', ':')).encode('ascii')).hexdigest()
+        configHash = hashlib.sha256(json.dumps(self._config, separators=jsonSep).encode('ascii')).hexdigest()
         configName = configHash + '.json'
         with open(self._dst(configName), 'w') as fp:
-            json.dump(self._config, fp, separators=(',', ':'))
+            json.dump(self._config, fp, separators=jsonSep)
         self._manifest[0]['Config'] = configName
         tags = []
         for tag in self._manifest[0]['RepoTags']:
@@ -132,10 +134,10 @@ class Image:
             tags.append(':'.join([name, newver]))
         self._manifest[0]['RepoTags'] = tags
         with open(self._dst('repositories'), 'w') as fp:
-            json.dump(self._repositories, fp, separators=(',', ':'))
+            json.dump(self._repositories, fp, separators=jsonSep)
             fp.write('\n')
         with open(self._dst('manifest.json'), 'w') as fp:
-            json.dump(self._manifest, fp, separators=(',', ':'))
+            json.dump(self._manifest, fp, separators=jsonSep)
             fp.write('\n')
 
     def _unpackLayers(self):
