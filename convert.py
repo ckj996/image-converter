@@ -19,9 +19,9 @@ def mkdir(path, skipIfExist=False):
     os.mkdir(path)
     return True
 
-def relPath(root):
+def relPath(*paths):
     def absPath(*subpaths):
-        return os.path.join(root, *subpaths)
+        return os.path.join(*paths, *subpaths)
     return absPath
 
 def sha256sum(path):
@@ -85,14 +85,16 @@ class UnpackedLayer:
             json.dump(root, fp, separators=jsonSep)
 
 class Image:
-    def __init__(self, path):
+    def __init__(self, path, pool='pool'):
         self._name = path.removesuffix('.tar')
         self._srcTar = path
-        self._src = relPath(self._name + '-orig')
-        self._dst = relPath(self._name + '-lazy')
-        self._tmp = relPath(self._name + '-temp')
-        self._pool = relPath(self._name + '-pool')
-        self._dstTar = self._name + '-lazy.tar'
+        self._src = relPath(self._name, 'orig')
+        self._dst = relPath(self._name, 'lazy')
+        self._tmp = relPath(self._name, 'temp')
+        self._pool = pool
+        self._target = self._name + '-lazy.tar'
+        mkdir(self._name, skipIfExist=True)
+        mkdir(self._pool, skipIfExist=True)
 
     def convert(self):
         self._untar()
@@ -103,14 +105,13 @@ class Image:
         self._assembleTarget()
 
     def _assembleTarget(self):
-        subprocess.run(['tar', '-cf', self._dstTar, '-C', self._dst(), '.'])
+        subprocess.run(['tar', '-cf', self._target, '-C', self._dst(), '.'])
 
     def _assembleLayers(self):
         mkdir(self._dst())
-        mkdir(self._pool(), skipIfExist=True)
         self._config['rootfs']['diff_ids'] = []
         for layer in self._unpackedLayers:
-            layer.convert(self._tmp(layer.id, 'metadata.json'), self._pool())
+            layer.convert(self._tmp(layer.id, 'metadata.json'), self._pool)
             #TODO
             packedLayer = layer.pack(self._dst())
             checksum = 'sha256:' + sha256sum(packedLayer.src)
