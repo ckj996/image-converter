@@ -17,9 +17,9 @@ def mkdir(path, skipIfExist=False):
     os.mkdir(path)
     return True
 
-def relPath(path):
-    def absPath(name=''):
-        return os.path.join(path, name)
+def relPath(root):
+    def absPath(*subpaths):
+        return os.path.join(root, *subpaths)
     return absPath
 
 def sha256sum(path):
@@ -108,16 +108,14 @@ class Image:
         mkdir(self._pool(), skipIfExist=True)
         self._config['rootfs']['diff_ids'] = []
         for layer in self._unpackedLayers:
-            layer.convert(self._tmp(os.path.join(layer.id, 'metadata.json')), self._pool())
+            layer.convert(self._tmp(layer.id, 'metadata.json'), self._pool())
             #TODO
             packedLayer = layer.pack(self._dst())
             checksum = 'sha256:' + sha256sum(packedLayer.src)
             self._config['rootfs']['diff_ids'].append(checksum)
             logging.info(f'assembled layer {checksum}')
-            layerVersion = os.path.join(layer.id, 'VERSION')
-            layerJson = os.path.join(layer.id, 'json')
-            shutil.copyfile(self._src(layerVersion), self._dst(layerVersion))
-            shutil.copyfile(self._src(layerJson), self._dst(layerJson))
+            shutil.copyfile(self._src(layer.id, 'VERSION'), self._dst(layer.id, 'VERSION'))
+            shutil.copyfile(self._src(layer.id, 'json'), self._dst(layer.id, 'json'))
 
     def _writeConfigs(self):
         configHash = hashlib.sha256(json.dumps(self._config, separators=(',', ':')).encode('ascii')).hexdigest()
