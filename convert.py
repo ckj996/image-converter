@@ -81,7 +81,8 @@ class UnpackedLayer:
                     if not os.path.exists(target):
                         shutil.copyfile(path, target)
                 dirents[f] = entry 
-        with open(metadata, 'w') as fp:
+        mkdir(self.src)
+        with open(os.path.join(self.src, metadata), 'w') as fp:
             json.dump(root, fp, separators=jsonSep)
 
 class Image:
@@ -111,8 +112,7 @@ class Image:
         mkdir(self._dst())
         self._config['rootfs']['diff_ids'] = []
         for layer in self._unpackedLayers:
-            layer.convert(self._tmp(layer.id, 'metadata.json'), self._pool)
-            #TODO
+            layer.convert('metadata.json', self._pool)
             packedLayer = layer.pack(self._dst())
             checksum = 'sha256:' + sha256sum(packedLayer.src)
             self._config['rootfs']['diff_ids'].append(checksum)
