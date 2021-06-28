@@ -11,6 +11,12 @@ import stat
 
 jsonSep = (',', ':')
 
+J_MODE = 'mode'
+J_DIRENT = 'dirents'
+J_SIZE = 'size'
+J_HASH = 'hash'
+J_LINK = 'link'
+
 def mkdir(path, skipIfExist=False):
     if os.path.exists(path):
         if skipIfExist and os.path.isdir(path):
@@ -58,29 +64,29 @@ class UnpackedLayer:
         subprocess.run(['tar', '-cf', path, '-C', self.src, '.'])
         return Layer(path)
     
-    def convert(self, metadata, pool):
-        root = {'mode': os.lstat(self.src).st_mode, 'dirents': {}}
+    def convert(self, metadata, pool, hashfunc=sha256sum):
+        root = {J_MODE: os.lstat(self.src).st_mode, J_DIRENT: {}}
         note = {self.src: root}
         for parent, dirs, files in os.walk(self.src):
-            dirents = note[parent]['dirents']
+            dirents = note[parent][J_DIRENT]
             for d in dirs:
                 path = os.path.join(parent, d)
                 s = os.lstat(path)
-                entry = {'mode': s.st_mode, 'dirents': {}}
-                dirents[d] = entry
-                note[path] = entry
+                dirent = {J_MODE: s.st_mode, J_DIRENT: {}}
+                dirents[d] = dirent
+                note[path] = dirent
             for f in files:
                 path = os.path.join(parent, f)
                 s = os.lstat(path)
                 if stat.S_ISLNK(s.st_mode):
-                    entry = {'mode': s.st_mode, 'size': s.st_size, 'link': os.readlink(path)}
+                    dirent = {J_MODE: s.st_mode, J_SIZE: s.st_size, J_LINK: os.readlink(path)}
                 else:
-                    checksum = sha256sum(path)
-                    entry = {'mode': s.st_mode, 'size': s.st_size, 'sha256': checksum}
-                    target = os.path.join(pool, checksum)
+                    hash = hashfunc(path)
+                    dirent = {J_MODE: s.st_mode, J_SIZE: s.st_size, J_HASH: hash}
+                    target = os.path.join(pool, hash)
                     if not os.path.exists(target):
                         shutil.copyfile(path, target)
-                dirents[f] = entry 
+                dirents[f] = dirent 
         mkdir(self.src)
         with open(os.path.join(self.src, metadata), 'w') as fp:
             json.dump(root, fp, separators=jsonSep)
