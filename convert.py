@@ -11,8 +11,9 @@ import stat
 
 jsonSep = (',', ':')
 
+J_LEVEL = 'level'
+J_NAME = 'name'
 J_MODE = 'mode'
-J_DIRENT = 'dirents'
 J_SIZE = 'size'
 J_HASH = 'hash'
 J_LINK = 'link'
@@ -50,6 +51,38 @@ class Layer:
         subprocess.run(['tar', '-xf', self.src, '-C', path])
         return UnpackedLayer(path)
 
+class File:
+    def __init__(self, path):
+        self.src = path
+        info = {}
+        info[J_LEVEL] = len(os.path.normpath(path).split(os.sep))
+        info[J_NAME] = os.path.basename(path)
+        s = os.lstat(path)
+        self.stat = s
+        info[J_MODE] = s.st_mode
+        info[J_SIZE] = s.st_size
+        if stat.S_ISDIR(s.st_mode):
+            pass
+        elif stat.S_ISREG(s.st_mode):
+            self.hash = sha256sum(path)
+            info[J_HASH] = self.hash
+        elif stat.S_ISLNK(s.st_mode):
+            info[J_LINK] = os.readlink(path)
+        else:
+            logging.warning(f'unexpected filetype, mode = {s.st_mode}')
+        self._info = info
+    
+    def info(self):
+        return self._info
+
+    def pour(self, pool):
+        if not stat.S_ISREG(self.stat.st_mode):
+            return self
+        dst = os.path.join(pool, self.hash)
+        if not os.path.exists(dst):
+            shutil.copyfile(self.src, dst)
+        return self
+
 class UnpackedLayer:
     def __init__(self, path):
         self.src = path
@@ -64,32 +97,21 @@ class UnpackedLayer:
         subprocess.run(['tar', '-cf', path, '-C', self.src, '.'])
         return Layer(path)
     
-    def convert(self, metadata, pool, hashfunc=sha256sum):
-        root = {J_MODE: os.lstat(self.src).st_mode, J_DIRENT: {}}
-        note = {self.src: root}
-        for parent, dirs, files in os.walk(self.src):
-            dirents = note[parent][J_DIRENT]
-            for d in dirs:
-                path = os.path.join(parent, d)
-                s = os.lstat(path)
-                dirent = {J_MODE: s.st_mode, J_DIRENT: {}}
-                dirents[d] = dirent
-                note[path] = dirent
-            for f in files:
-                path = os.path.join(parent, f)
-                s = os.lstat(path)
-                if stat.S_ISLNK(s.st_mode):
-                    dirent = {J_MODE: s.st_mode, J_SIZE: s.st_size, J_LINK: os.readlink(path)}
-                else:
-                    hash = hashfunc(path)
-                    dirent = {J_MODE: s.st_mode, J_SIZE: s.st_size, J_HASH: hash}
-                    target = os.path.join(pool, hash)
-                    if not os.path.exists(target):
-                        shutil.copyfile(path, target)
-                dirents[f] = dirent 
+    def lazify(self, metadata, pool):
+        pool = os.path.abspath(pool)
+        oldcwd = os.getcwd()
+        os.chdir(self.src)
+        filelist = []
+        for parent, dirs, files in os.walk('.'):
+            dirs.sort()
+            if parent != '.':
+                filelist.append(File(parent).info())
+            for name in sorted(files):
+                filelist.append(File(os.path.join(parent, name)).pour(pool).info())
+        os.chdir(oldcwd)
         mkdir(self.src)
         with open(os.path.join(self.src, metadata), 'w') as fp:
-            json.dump(root, fp, separators=jsonSep)
+            json.dump(filelist, fp, separators=jsonSep)
 
 class Image:
     def __init__(self, path, pool='pool'):
@@ -118,7 +140,7 @@ class Image:
         mkdir(self._dst())
         self._config['rootfs']['diff_ids'] = []
         for layer in self._unpackedLayers:
-            layer.convert('metadata.json', self._pool)
+            layer.lazify('metadata.json', self._pool)
             packedLayer = layer.pack(self._dst())
             checksum = 'sha256:' + sha256sum(packedLayer.src)
             self._config['rootfs']['diff_ids'].append(checksum)
