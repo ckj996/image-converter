@@ -11,12 +11,7 @@ import stat
 
 jsonSep = (',', ':')
 
-J_LEVEL = 'level'
-J_NAME = 'name'
-J_MODE = 'mode'
-J_SIZE = 'size'
-J_HASH = 'hash'
-J_LINK = 'link'
+lazifier = None
 
 def mkdir(path, skipIfExist=False):
     if os.path.exists(path):
@@ -51,38 +46,6 @@ class Layer:
         subprocess.run(['tar', '-xf', self.src, '-C', path])
         return UnpackedLayer(path)
 
-class File:
-    def __init__(self, path):
-        self.src = path
-        info = {}
-        info[J_LEVEL] = len(os.path.normpath(path).split(os.sep))
-        info[J_NAME] = os.path.basename(path)
-        s = os.lstat(path)
-        self.stat = s
-        info[J_MODE] = s.st_mode
-        info[J_SIZE] = s.st_size
-        if stat.S_ISDIR(s.st_mode):
-            pass
-        elif stat.S_ISREG(s.st_mode):
-            self.hash = sha256sum(path)
-            info[J_HASH] = self.hash
-        elif stat.S_ISLNK(s.st_mode):
-            info[J_LINK] = os.readlink(path)
-        else:
-            logging.warning(f'unexpected filetype, mode = {s.st_mode}')
-        self._info = info
-    
-    def info(self):
-        return self._info
-
-    def pour(self, pool):
-        if not stat.S_ISREG(self.stat.st_mode):
-            return self
-        dst = os.path.join(pool, self.hash)
-        if not os.path.exists(dst):
-            shutil.copyfile(self.src, dst)
-        return self
-
 class UnpackedLayer:
     def __init__(self, path):
         self.src = path
@@ -99,19 +62,9 @@ class UnpackedLayer:
     
     def lazify(self, metadata, pool):
         pool = os.path.abspath(pool)
-        oldcwd = os.getcwd()
-        os.chdir(self.src)
-        filelist = []
-        for parent, dirs, files in os.walk('.'):
-            dirs.sort()
-            if parent != '.':
-                filelist.append(File(parent).info())
-            for name in sorted(files):
-                filelist.append(File(os.path.join(parent, name)).pour(pool).info())
-        os.chdir(oldcwd)
+        subprocess.run([lazifier, self.src, metadata, pool])
         mkdir(self.src)
-        with open(os.path.join(self.src, metadata), 'w') as fp:
-            json.dump(filelist, fp, separators=jsonSep)
+        shutil.move(metadata, self.src)
 
 class Image:
     def __init__(self, path, pool='pool'):
@@ -199,7 +152,14 @@ class Image:
 
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.DEBUG)
-    if len(sys.argv) != 2:
-        print(f'Usage: {sys.argv[0]} tarball')
+    if len(sys.argv) != 3:
+        print(f'Usage: {sys.argv[0]} tarball lazifier\n' +
+            '\n  tarball\n' +
+            '       The image.tar created by docker save.\n' +
+            '\n  lazifier\n' +
+            '       A command which takes 3 arguments: <root>, <meta>, and <pool>.\n' +
+            '       It will traverse the <root> directory tree, save the tree structure in <meta>,\n' +
+            '       and stash the content of regular files into the <pool> based on its sha256sum.')
         sys.exit(-1)
+    lazifier = sys.argv[2]
     Image(sys.argv[1]).convert()
