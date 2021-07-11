@@ -11,8 +11,6 @@ import stat
 
 jsonSep = (',', ':')
 
-lazifier = None
-
 def mkdir(path, skipIfExist=False):
     if os.path.exists(path):
         if skipIfExist and os.path.isdir(path):
@@ -60,23 +58,29 @@ class UnpackedLayer:
         subprocess.run(['tar', '-cf', path, '-C', self.src, '.'])
         return Layer(path)
     
-    def lazify(self, metadata, pool):
-        pool = os.path.abspath(pool)
-        subprocess.run([lazifier, self.src, metadata, pool])
+    def lazify(self, metadata):
+        lazifier.lazify(self.src, metadata)
         mkdir(self.src)
         shutil.move(metadata, self.src)
 
+class Lazifier:
+    def __init__(self, cmd):
+        self.cmd = cmd
+
+    def lazify(self, root, output):
+        subprocess.run([self.cmd, root, output])
+
+lazifier = Lazifier('cafs-convert')
+
 class Image:
-    def __init__(self, path, pool='pool'):
+    def __init__(self, path):
         self._name = path.removesuffix('.tar')
         self._srcTar = path
         self._src = relPath(self._name, 'orig')
         self._dst = relPath(self._name, 'lazy')
         self._tmp = relPath(self._name, 'temp')
-        self._pool = pool
         self._target = self._name + '-lazy.tar'
         mkdir(self._name, skipIfExist=True)
-        mkdir(self._pool, skipIfExist=True)
 
     def convert(self):
         self._untar()
@@ -93,7 +97,7 @@ class Image:
         mkdir(self._dst())
         self._config['rootfs']['diff_ids'] = []
         for layer in self._unpackedLayers:
-            layer.lazify('metadata.json', self._pool)
+            layer.lazify('metadata.json')
             packedLayer = layer.pack(self._dst())
             checksum = 'sha256:' + sha256sum(packedLayer.src)
             self._config['rootfs']['diff_ids'].append(checksum)
@@ -152,14 +156,15 @@ class Image:
 
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.DEBUG)
-    if len(sys.argv) != 3:
-        print(f'Usage: {sys.argv[0]} tarball lazifier\n' +
+    if len(sys.argv) < 2:
+        print(f'Usage: {sys.argv[0]} tarball [lazifier]\n' +
             '\n  tarball\n' +
             '       The image.tar created by docker save.\n' +
             '\n  lazifier\n' +
-            '       A command which takes 3 arguments: <root>, <meta>, and <pool>.\n' +
+            '       A command which takes 2 arguments: <root> <meta>\n' +
             '       It will traverse the <root> directory tree, save the tree structure in <meta>,\n' +
-            '       and stash the content of regular files into the <pool> based on its sha256sum.')
+            '       and stash the content of regular files into the pool based on its sha256sum.')
         sys.exit(-1)
-    lazifier = sys.argv[2]
+    if len(sys.argv) > 2:
+        lazifier = Lazifier(sys.argv[2])
     Image(sys.argv[1]).convert()
