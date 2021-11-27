@@ -113,7 +113,7 @@ class Image:
         self._manifest[0]['Config'] = configName
         tags = []
         for tag in self._manifest[0]['RepoTags']:
-            name, ver = tag.split(':')
+            name, ver = tag.rsplit(':', 1)
             newver = ver + '-lazy'
             self._repositories[name][newver] = self._repositories[name][ver]
             del self._repositories[name][ver]
